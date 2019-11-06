@@ -26,22 +26,22 @@ void errorledoff() {
  *  DOT  DASH  DOT
  *   .    --    .
  *   ^ symbol
- *      ^ space between symbols
- *  ############## character, consisting of symbols and short spaces
+ *      ^ space between current_character
+ *  ############## character, consisting of current_character and short spaces
  *                ######## longer space after character
  *  an even longer space is used between words
  *
  *  5 LSB stores DOTs and DASHes,
  *  DASH is 1
  *  DOT is 0
- *  3 MSBs store the number of symbols in the character
+ *  3 MSBs store the number of current_character in the character
  */
 
 #define DOT_LENGTH 1
 #define DASH_LENGTH 3
 #define SPACE_BETWEEN_SYMBOLS 1
-#define SPACE_BETWEEN_CHARACTERS 3
-#define SPACE_BETWEEN_WORDS 7
+#define SPACE_BETWEEN_CHARACTERS 3 -1
+#define SPACE_BETWEEN_WORDS 7 -1
 
 // binary encoding of the LUT
 #define DASH_1 1
@@ -58,8 +58,8 @@ void errorledoff() {
 #define LENGTH_5 (5<<LENGTH_SHIFT)
 
 typedef enum {
-    WAITING = 0,
-    SHOWING,
+    LED_OFF = 0,
+    LED_ON,
     FINISHED,
 } morstate_t;
 
@@ -110,40 +110,44 @@ unsigned char blut[36] = {
     DASH_1 + DASH_2 + DASH_3 + DASH_4 + DOT_x  + LENGTH_5, // 9: '- - - - .' +
 };
 
-char base = 37;
-char index = 0;
+char codepoint = 37;
+char symbolIndex = 0;
 char symbolsInCharacter = 0;
 char countdown = 0;
-morstate_t morstate = WAITING;
+morstate_t morstate = LED_OFF;
+unsigned char mask_cache;
+unsigned char* current_character;
 
 /* public functions */
 /**
  * stops transmission of the morse character
  */
 void clearMorsError() {
-    index = 0;
-    base = 37;
+    symbolIndex = 0;
+    codepoint = 37;
     errorledoff();
 }
 
 void setMorsError(char code) {
-    base = 37;
+    codepoint = 37;
     if (code == ' ') {
-            base = 36;
+            codepoint = 36;
     } else {
         if ((code >= 'a') && (code <= 'z')) {
-            base = code - 'a';
+            codepoint = code - 'a';
         } else if ((code >= '0') && code <= '9') {
-            base = code - '0' + 26;
+            codepoint = code - '0' + 26;
         } else if ((code >= 'A') && (code <= 'Z')) {
-            base = code - 'A';
+            codepoint = code - 'A';
         }
 
-        symbolsInCharacter = (blut[base])>>LENGTH_SHIFT;
+        // it's not a space; set pointer to the correct LUT entry
+        current_character = &(blut[codepoint]);
+        symbolsInCharacter = (current_character & (7<<LENGTH_SHIFT))>>LENGTH_SHIFT;
     }
 
-    index = 0;
-    morstate = WAITING;
+    symbolIndex = 0;
+    morstate = LED_OFF;
     updateMorsE();
 }
 
@@ -156,55 +160,66 @@ void setMorsError(char code) {
  */
 char updateMorsE() {
     char returnCode;
-    if (base > 36) { // code point does not exist, idle
+    if (codepoint > 36) {
+        // code point does not exist, idle
         returnCode = 1;
     } else {
         returnCode = 0;
         if (countdown) {
-            // all set, we're waiting
+            // all set, we just wait for the countdown
             countdown--;
         } else { // countdown expired!
-            if (SHOWING == morstate) {
-                // a symbol was active, so turn off the LED for the space between symbols
+            if (LED_ON == morstate) {
+                // a symbol was active, so turn off the LED for the space between current_character
                 errorledoff();
                 countdown = SPACE_BETWEEN_SYMBOLS;
-                morstate = WAITING;
-            } else { // load new symbol
-                if (WAITING == morstate) {
-                    morstate = SHOWING;
+                morstate = LED_OFF;
+            } else { // morstate is either LED_OFF or FINISHED
 
-                    if (base == 36) {
-                        // it's a space!
+                if (LED_OFF == morstate) {
+                    // advance to the next symbol
+
+                    if (codepoint == 36) {
+                        // it's a space! special case.
                         errorledoff();
                         countdown = SPACE_BETWEEN_WORDS;
                         morstate = FINISHED;
-                    } else {
-                        // LUT
-                        unsigned char code = blut[base];
-                        if (index > symbolsInCharacter-1) {
+                    } else { // it's not a space
+
+                        if (symbolIndex > symbolsInCharacter-1) {
+                            // no current_character left, this means end of character
                             errorledoff();
                             countdown = SPACE_BETWEEN_CHARACTERS;
-                            index = 0;
+                            symbolIndex = 0;
                             morstate = FINISHED;
+                            mask_cache = 1;
                         } else {
+                            // advance to the next symbol in the same character
                             errorledon();
-                            if (code & (DASH_1<<index)) {
+
+                            if (mask_cache & current_character) { // symbol decoder
                                 // it's a DASH!
                                 countdown = DASH_LENGTH;
                             } else {
                                 // it's a DOT we must deal with
                                 countdown = DOT_LENGTH;
                             }
+                            morstate = LED_ON;
+
+                            // shift the symbol cache to the right
+                            mask_cache<<1;
+                            symbolIndex++;
                         }
-                        index++;
                     }
                 } else {
                     // morstate is FINISHED
-                    returnCode = 1; // end of symbol
-                    morstate = WAITING;
+                    returnCode = 1; // signal the end of symbol
+                    morstate = LED_OFF;
+                    // reload character from LUT
+                    mask_cache = 1;
                 }
             }
-        }
-    }
+        } // end of "countdown expired" path
+    } // end of "valid character" code path
     return returnCode;
 }
