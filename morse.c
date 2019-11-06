@@ -116,7 +116,7 @@ char symbolsInCharacter = 0;
 char countdown = 0;
 morstate_t morstate = LED_OFF;
 unsigned char mask_cache;
-unsigned char* current_character;
+unsigned char current_character;
 
 /* public functions */
 /**
@@ -142,7 +142,7 @@ void setMorsError(char code) {
         }
 
         // it's not a space; set pointer to the correct LUT entry
-        current_character = &(blut[codepoint]);
+        current_character = blut[codepoint];
         symbolsInCharacter = (current_character & (7<<LENGTH_SHIFT))>>LENGTH_SHIFT;
     }
 
