@@ -207,7 +207,7 @@ char updateMorsE() {
                             morstate = LED_ON;
 
                             // shift the symbol cache to the right
-                            mask_cache<<1;
+                            mask_cache = mask_cache<<1;
                             symbolIndex++;
                         }
                     }
